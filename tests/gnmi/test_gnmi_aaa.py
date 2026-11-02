@@ -233,15 +233,22 @@ def test_gnmi_audit_rate_limit(gnmi_tls):  # noqa: F811
 def test_gnmi_audit_log_remote_forwarding(gnmi_tls, ptfhost, operation, method):  # noqa: F811
     duthost = gnmi_tls.duthost
     syslog_vrf = "mgmt" if is_mgmt_vrf_enabled(duthost) else None
-
-    with capture_remote_syslog(duthost, ptfhost.mgmt_ip, vrf=syslog_vrf) as (capture_result, capture_file):
+    use_ipv6 = duthost.get_mgmt_ip()["version"] == "v6"
+    destination = ptfhost.mgmt_ipv6 if use_ipv6 else ptfhost.mgmt_ip
+    pytest_assert(
+        destination,
+        "PTF has no {} management address for remote syslog".format(
+            "IPv6" if use_ipv6 else "IPv4"
+        ),
+    )
+    with capture_remote_syslog(duthost, ptfhost, destination, vrf=syslog_vrf) as (capture_result, capture_file):
         offset = get_audit_log_offset(duthost)
         with allure.step("Generate a {} audit record".format(method)):
             operation(gnmi_tls.pygnmi_client)
 
         with allure.step("Verify the remotely forwarded audit record"):
             local_records = wait_for_audit_record(duthost, offset, method, CLIENT_PRINCIPAL)
-            forwarded_payloads = read_syslog_payloads(duthost, capture_result, capture_file)
+            forwarded_payloads = read_syslog_payloads(ptfhost, capture_result, capture_file)
             pytest_assert(
                 any(RPC_COMPLETION_PREFIX in payload for payload in forwarded_payloads),
                 "No RPC_COMPLETION marker found in forwarded UDP packets",
